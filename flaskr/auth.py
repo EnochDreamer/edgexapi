@@ -14,6 +14,8 @@ KINDE_DOMAIN = os.getenv('KINDE_DOMAIN')
 _alg_env = os.getenv('KINDE_ALGORITHMS', 'RS256')
 ALGORITHMS = [a.strip() for a in _alg_env.split(',') if a.strip()]
 KINDE_API_AUDIENCE = os.getenv('KINDE_AUDIENCE')
+KINDE_ISSUER = os.getenv('KINDE_ISSUER')
+KINDE_JWKS_URL = os.getenv('KINDE_JWKS_URL')
 
 
 # AuthError Exception
@@ -88,13 +90,23 @@ def verify_decode_jwt(token):
     except Exception:
         unverified_claims = {}
 
-    # Determine issuer base URL either from configured domain or token 'iss'
+    # Determine issuer base URL either from configured domain, token 'iss',
+    # or fallbacks via KINDE_ISSUER / KINDE_JWKS_URL environment variables.
+    issuer = None
     if KINDE_DOMAIN:
         issuer = 'https://' + KINDE_DOMAIN
-    else:
+    elif unverified_claims.get('iss'):
         issuer = unverified_claims.get('iss')
+    elif KINDE_ISSUER:
+        issuer = KINDE_ISSUER
+    elif KINDE_JWKS_URL:
+        # Derive issuer by stripping the well-known suffix if present
+        issuer = KINDE_JWKS_URL
+        if issuer.endswith('/.well-known/jwks.json'):
+            issuer = issuer[: -len('/.well-known/jwks.json')]
 
     if not issuer:
+        current_app.logger.warning('No issuer found (env KINDE_DOMAIN/KINDE_ISSUER/KINDE_JWKS_URL or token iss); token claims: %s', unverified_claims)
         raise AuthError({'code': 'invalid_issuer', 'description': 'Issuer not found'}, 401)
 
     jwks_url = issuer.rstrip('/') + '/.well-known/jwks.json'
