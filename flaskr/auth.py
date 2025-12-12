@@ -82,7 +82,7 @@ def check_permissions(permission, payload):
 # verifies JWT Source signature
 
 
-def verify_decode_jwt(token):
+def verify_decode_jwt(token, allow_signature_only: bool = False):
     # Get unverified header and claims first so we can derive issuer/jwks URL
     unverified_header = jwt.get_unverified_header(token)
     try:
@@ -129,7 +129,7 @@ def verify_decode_jwt(token):
                 'e': key['e']
             }
     if rsa_key:
-        try:
+    try:
             # Build decode arguments and options dynamically. Some tokens from
             # webhooks may omit iss/aud/exp; in that case we perform
             # signature-only verification (we still require a trusted JWKS).
@@ -147,6 +147,7 @@ def verify_decode_jwt(token):
             if 'exp' not in unverified_claims:
                 options['verify_exp'] = False
 
+            current_app.logger.debug('Verifying token with issuer=%s jwks_url=%s header=%s claims_preview=%s', issuer, jwks_url, unverified_header, {k: unverified_claims.get(k) for k in ('aud','iss','exp')})
             # Perform decode (signature verified using rsa_key). We disable
             # audience check because we handle aud lists manually below.
             payload = jwt.decode(token, rsa_key, options=options, **decode_kwargs)
@@ -180,10 +181,27 @@ def verify_decode_jwt(token):
             }, 401)
 
         except jose_exceptions.JWTClaimsError:
-            raise AuthError({
-                'code': 'invalid_claims',
-                'description': 'Incorrect claims. Please, check the audience and issuer.'
-            }, 401)
+            # If allowed, attempt a relaxed signature-only decode (no iss/aud/exp checks)
+            if allow_signature_only:
+                current_app.logger.info('JWTClaimsError: attempting signature-only verification because allow_signature_only=True')
+                try:
+                    relaxed_options = {'verify_aud': False, 'verify_iss': False, 'verify_exp': False}
+                    relaxed_payload = jwt.decode(token, rsa_key, options=relaxed_options, algorithms=ALGORITHMS)
+                    # minimal structural checks: ensure type and data.user.id exist
+                    if not (isinstance(relaxed_payload, dict) and relaxed_payload.get('type') and isinstance(relaxed_payload.get('data'), dict) and isinstance(relaxed_payload['data'].get('user'), dict) and relaxed_payload['data']['user'].get('id')):
+                        raise AuthError({'code': 'invalid_payload', 'description': 'Required event payload missing'}, 401)
+                    return relaxed_payload
+                except Exception:
+                    current_app.logger.exception('Relaxed signature-only verification failed')
+                    raise AuthError({
+                        'code': 'invalid_claims',
+                        'description': 'Incorrect claims. Please, check the audience and issuer.'
+                    }, 401)
+            else:
+                raise AuthError({
+                    'code': 'invalid_claims',
+                    'description': 'Incorrect claims. Please, check the audience and issuer.'
+                }, 401)
         except jose_exceptions.JOSEError:
             raise AuthError({
                 'code': 'invalid_header',

@@ -20,7 +20,7 @@ def User():
     """
     token = request.get_data(as_text=True)
     print(token)
-    payload = verify_decode_jwt(token)
+    payload = verify_decode_jwt(token, allow_signature_only=True)
     if not payload:
         return jsonify({"success": False, "error": "Invalid JSON"}), 400
 
