@@ -1,5 +1,5 @@
 import json
-from flask import request, _request_ctx_stack, abort, current_app
+from flask import request, abort, current_app
 from functools import wraps
 from jose import jwt
 from jose import exceptions as jose_exceptions
