@@ -130,14 +130,26 @@ def verify_decode_jwt(token):
             }
     if rsa_key:
         try:
-            # Decode while disabling automatic audience verification so we can
-            # handle tokens where the `aud` claim is a list.
-            decode_kwargs = {
-                'algorithms': ALGORITHMS,
-                'issuer': issuer.rstrip('/') + '/'
-            }
-            # Disable audience verification in decode and validate it manually below
-            payload = jwt.decode(token, rsa_key, options={'verify_aud': False}, **decode_kwargs)
+            # Build decode arguments and options dynamically. Some tokens from
+            # webhooks may omit iss/aud/exp; in that case we perform
+            # signature-only verification (we still require a trusted JWKS).
+            decode_kwargs = {'algorithms': ALGORITHMS}
+            options = {'verify_aud': False}
+
+            # Only include issuer validation if we derived an issuer
+            if issuer:
+                decode_kwargs['issuer'] = issuer.rstrip('/') + '/'
+            else:
+                # no issuer -> disable issuer verification
+                options['verify_iss'] = False
+
+            # If token lacks exp claim, disable expiry verification
+            if 'exp' not in unverified_claims:
+                options['verify_exp'] = False
+
+            # Perform decode (signature verified using rsa_key). We disable
+            # audience check because we handle aud lists manually below.
+            payload = jwt.decode(token, rsa_key, options=options, **decode_kwargs)
 
             # Manual audience check (support aud as string or list)
             if KINDE_API_AUDIENCE:
