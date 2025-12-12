@@ -129,7 +129,7 @@ def verify_decode_jwt(token, allow_signature_only: bool = False):
                 'e': key['e']
             }
     if rsa_key:
-    try:
+        try:
             # Build decode arguments and options dynamically. Some tokens from
             # webhooks may omit iss/aud/exp; in that case we perform
             # signature-only verification (we still require a trusted JWKS).
