@@ -11,6 +11,7 @@ class Product(db.Model):
     description = db.Column(db.Text, nullable=True)
     price = db.Column(db.Numeric(10, 2), nullable=False, default=Decimal("0.00"))
     created_at = db.Column(db.DateTime, server_default=db.func.now(), nullable=False)
+    
 
     def __repr__(self) -> str:
         return f"<Product {self.name}>"

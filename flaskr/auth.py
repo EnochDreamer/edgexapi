@@ -1,0 +1,201 @@
+import json
+from flask import request, _request_ctx_stack, abort, current_app
+from functools import wraps
+from jose import jwt
+from jose import exceptions as jose_exceptions
+from urllib.request import urlopen
+import os
+
+
+# my secrets , left here as this app isn't going to go to production
+# Kinde domain / tenant (example: your-workspace.kinde.com)
+KINDE_DOMAIN = os.getenv('KINDE_DOMAIN')
+# Algorithms expected for JWT verification. Default to RS256; allow override via KINDE_ALGORITHMS="RS256,RS512"
+_alg_env = os.getenv('KINDE_ALGORITHMS', 'RS256')
+ALGORITHMS = [a.strip() for a in _alg_env.split(',') if a.strip()]
+KINDE_API_AUDIENCE = os.getenv('KINDE_AUDIENCE')
+
+
+# AuthError Exception
+'''
+AuthError Exception
+A standardized way to communicate auth failure modes
+'''
+
+
+class AuthError(Exception):
+    def __init__(self, error, status_code):
+        self.error = error
+        self.status_code = status_code
+
+
+# Auth Header
+
+
+# function to verify JWT
+
+
+def get_token_auth_header():
+    auth = request.headers.get('Authorization', None)
+    if not auth:
+        abort(401)
+
+    # splits components on whitespace
+    parts = auth.split()
+
+    # validates token to be a bearer token
+    if parts[0].lower() != 'bearer':
+        abort(401)
+
+    # validates token has two components
+    if len(parts) != 2:
+        abort(401)
+
+    token = parts[1]
+    return token
+
+
+
+
+# checks for required permission
+
+
+def check_permissions(permission, payload):
+    if payload is None:
+        abort(401)
+    # Kinde tokens may include an empty permissions list; treat missing as empty
+    perms = payload.get("permissions") or []
+    if not isinstance(perms, list):
+        # if permissions come as a space-delimited string, split them
+        if isinstance(perms, str):
+            perms = perms.split()
+        else:
+            perms = []
+    if permission:
+        if permission not in perms:
+            abort(403)
+    return True
+
+
+# verifies JWT Source signature
+
+
+def verify_decode_jwt(token):
+    # Get unverified header and claims first so we can derive issuer/jwks URL
+    unverified_header = jwt.get_unverified_header(token)
+    try:
+        unverified_claims = jwt.get_unverified_claims(token)
+    except Exception:
+        unverified_claims = {}
+
+    # Determine issuer base URL either from configured domain or token 'iss'
+    if KINDE_DOMAIN:
+        issuer = 'https://' + KINDE_DOMAIN
+    else:
+        issuer = unverified_claims.get('iss')
+
+    if not issuer:
+        raise AuthError({'code': 'invalid_issuer', 'description': 'Issuer not found'}, 401)
+
+    jwks_url = issuer.rstrip('/') + '/.well-known/jwks.json'
+    jsonurl = urlopen(jwks_url)
+    jwks = json.loads(jsonurl.read())
+    rsa_key = {}
+    if 'kid' not in unverified_header:
+        raise AuthError({
+            'code': 'invalid_header',
+            'description': 'Authorization malformed.'
+        }, 401)
+
+    for key in jwks['keys']:
+        if key['kid'] == unverified_header['kid']:
+            rsa_key = {
+                'kty': key['kty'],
+                'kid': key['kid'],
+                'use': key['use'],
+                'n': key['n'],
+                'e': key['e']
+            }
+    if rsa_key:
+        try:
+            # Decode while disabling automatic audience verification so we can
+            # handle tokens where the `aud` claim is a list.
+            decode_kwargs = {
+                'algorithms': ALGORITHMS,
+                'issuer': issuer.rstrip('/') + '/'
+            }
+            # Disable audience verification in decode and validate it manually below
+            payload = jwt.decode(token, rsa_key, options={'verify_aud': False}, **decode_kwargs)
+
+            # Manual audience check (support aud as string or list)
+            if KINDE_API_AUDIENCE:
+                aud_claim = payload.get('aud')
+                if aud_claim is None:
+                    # Some tokens may use 'audience' key
+                    aud_claim = payload.get('audience')
+
+                if isinstance(aud_claim, list):
+                    if KINDE_API_AUDIENCE not in aud_claim:
+                        raise AuthError({
+                            'code': 'invalid_audience',
+                            'description': 'The required audience is not present in the token.'
+                        }, 401)
+                else:
+                    if aud_claim != KINDE_API_AUDIENCE:
+                        raise AuthError({
+                            'code': 'invalid_audience',
+                            'description': 'Incorrect audience. Please, check the audience.'
+                        }, 401)
+
+            return payload
+
+        except jose_exceptions.ExpiredSignatureError:
+            raise AuthError({
+                'code': 'token_expired',
+                'description': 'Token expired.'
+            }, 401)
+
+        except jose_exceptions.JWTClaimsError:
+            raise AuthError({
+                'code': 'invalid_claims',
+                'description': 'Incorrect claims. Please, check the audience and issuer.'
+            }, 401)
+        except jose_exceptions.JOSEError:
+            raise AuthError({
+                'code': 'invalid_header',
+                'description': 'Unable to parse authentication token.'
+            }, 400)
+        except Exception:
+            # Fallback for unexpected errors
+            current_app.logger.exception('Unexpected error verifying token')
+            raise AuthError({
+                'code': 'invalid_header',
+                'description': 'Unable to parse authentication token.'
+            }, 400)
+    raise AuthError({
+        'code': 'invalid_header',
+                'description': 'Unable to find the appropriate key.'
+    }, 400)
+
+
+
+# Authentication decorator function
+
+
+def requires_auth(permission=''):
+    def requires_auth_decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            try:
+                token = get_token_auth_header()
+            except:
+                abort(401)
+            try:
+                payload = verify_decode_jwt(token)
+            except:
+                abort(401)
+            check_permissions(permission, payload)
+            return f(payload, *args, **kwargs)
+
+        return wrapper
+    return requires_auth_decorator
