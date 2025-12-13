@@ -8,7 +8,7 @@ bp = Blueprint("user", __name__)
 
 
 @bp.route("/register", methods=["POST"])
-def User():
+def register():
     """Handle Kinde webhook events on the /register endpoint.
 
     Only handles:
@@ -50,7 +50,8 @@ def User():
                 candidate = f"{base_username}_{i}"[:80]
                 i += 1
             user_obj = User(username=candidate, email=email)
-            user_obj.save()
+            db.session.add(user_obj)
+            db.session.commit()
             return jsonify({"success": True, "user": {"id": user_obj.id, "username": user_obj.username, "email": user_obj.email}})
         except Exception:
             current_app.logger.exception('Failed to create user from webhook')
