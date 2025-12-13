@@ -38,8 +38,7 @@ def User():
             return jsonify({"success": False, "error": "User email missing"}), 400
 
         try:
-            existing = User.query.filter_by(email=email).first()
-            if existing:
+            if User.query.filter_by(email=email).one_or_none():
                 # Do not perform updates per request
                 return jsonify({"success": False, "error": "User already exists"}), 409
 
