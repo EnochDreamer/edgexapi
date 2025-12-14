@@ -33,6 +33,7 @@ def register():
         first_name = user.get('first_name')
         last_name = user.get('last_name')
         username = user.get('username')
+        kinde_id = user.get('id')
 
         if not email:
             return jsonify({"success": False, "error": "User email missing"}), 400
@@ -49,7 +50,7 @@ def register():
             while User.query.filter_by(username=candidate).first():
                 candidate = f"{base_username}_{i}"[:80]
                 i += 1
-            user_obj = User(username=candidate, email=email)
+            user_obj = User(username=candidate, email=email, kinde_id=kinde_id)
             db.session.add(user_obj)
             db.session.commit()
             return jsonify({"success": True, "user": {"id": user_obj.id, "username": user_obj.username, "email": user_obj.email}})
@@ -58,15 +59,15 @@ def register():
             return jsonify({"success": False, "error": "Database error"}), 500
 
     if event_type == 'user.deleted' and user:
-        email = user.get('email')
-        if not email:
-            return jsonify({"success": False, "error": "User email missing for delete"}), 400
+        kinde_id = user.get('id')
+        if not kinde_id:
+            return jsonify({"success": False, "error": "User kinde_id missing for delete"}), 400
         try:
-            existing = User.query.filter_by(email=email).first()
+            existing = User.query.filter_by(kinde_id=kinde_id).first()
             if not existing:
                 return jsonify({"success": False, "error": "User not found"}), 404
             existing.remove()
-            return jsonify({"success": True, "deleted_email": email})
+            return jsonify({"success": True, "deleted_kinde_id": kinde_id})
         except Exception:
             current_app.logger.exception('Failed to delete user from webhook')
             return jsonify({"success": False, "error": "Database error"}), 500
